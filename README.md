@@ -3,7 +3,7 @@
 
 ## 技術スタック
 - Frontend: React + Tailwind + Vite
-- Backend: Flask + Flask-JWT-Extended + SQLAlchemy
+- Backend: Flask + Flask-JWT-Extended + Flask-Migrate + SQLAlchemy
 - DB: PostgreSQL
 - Infra: Docker Compose
 
@@ -18,6 +18,19 @@
 4. frontend
    - `http://localhost:5173`
 
+## DBマイグレーション
+```bash
+cd backend
+flask --app app db upgrade
+```
+
+モデル変更時:
+```bash
+cd backend
+flask --app app db migrate -m "describe change"
+flask --app app db upgrade
+```
+
 ## テスト
 ```bash
 cd backend && pytest
@@ -26,4 +39,5 @@ cd backend && pytest
 ## ドキュメント
 - ロードマップ: `docs/roadmap.md`
 - Issue: `docs/issues/ISSUE-0001.md`
+- Issue: `docs/issues/ISSUE-0002.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
