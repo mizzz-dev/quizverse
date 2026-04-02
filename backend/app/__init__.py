@@ -3,6 +3,7 @@ from flask import Flask
 from .api.health import health_bp
 from .config import Config
 from .extensions import db, jwt, migrate
+from . import models  # noqa: F401
 
 
 def create_app(config_class=Config):

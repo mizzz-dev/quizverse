@@ -1,0 +1,58 @@
+# QuizVerse MVP Core Schema (ISSUE-0003)
+
+## 方針
+- MVPに必要な認証・クイズ・プレイ履歴の最小テーブルへ限定。
+- `rankings` は保存型で固定せず、**日次スナップショット保存 (`leaderboard_snapshots`)** を採用。
+  - 理由: MVPではランキングAPIの応答安定性を優先しつつ、将来は集計SQLからmaterialized view化へ移行しやすいため。
+
+## テーブル一覧
+
+### users
+- ユーザー基本情報。
+- `email` はユニーク。
+- `status`: `active/suspended/withdrawn`。
+
+### user_oauth_accounts
+- OAuthプロバイダ連携情報（MVPではGoogle想定）。
+- `provider + provider_user_id` をユニーク制約。
+
+### otp_verifications
+- OTP検証履歴。
+- `purpose` を `login/signup/password_reset` で保持。
+- `attempt_count` で試行回数を管理。
+
+### quizzes
+- クイズ本体。
+- 作成者は `author_user_id`。
+- `status` は `draft/published/archived`。
+
+### questions
+- クイズ設問。
+- `sort_order` と `points` を保持。
+
+### choices
+- 各設問の選択肢。
+- `is_correct` で正誤を表現。
+
+### quiz_plays
+- ユーザーのプレイ単位のセッション。
+- `status` は `started/submitted/abandoned`。
+- スコア・正解数などを保持。
+
+### quiz_play_answers
+- 各設問に対する回答履歴。
+- `selected_choice_id` はスキップ時にNULL許容。
+- `result` は `correct/incorrect/skipped`。
+
+### leaderboard_snapshots
+- 日次・クイズ単位のランキングスナップショット。
+- `snapshot_date + quiz_id + user_id` ユニーク。
+
+### audit_logs
+- 監査ログ最小構成。
+- 操作者、操作種別、対象エンティティ、メタ情報(JSON)を保持。
+
+## 仮置き仕様（後続Issueで確定）
+- OTP送信チャネルは現時点で `email` のみ。
+- ランキング集計バッチの実行タイミング（日次/時間単位）は未確定。
+- `audit_logs.metadata` の構造はイベントごとに運用で定義。
