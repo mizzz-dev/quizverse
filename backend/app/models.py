@@ -1,6 +1,7 @@
 import enum
 
 from sqlalchemy import CheckConstraint, UniqueConstraint
+from werkzeug.security import check_password_hash, generate_password_hash
 from sqlalchemy.orm import validates
 
 from .extensions import db
@@ -70,7 +71,16 @@ class User(TimestampMixin, db.Model):
     display_name = db.Column(db.String(80), nullable=False)
     status = db.Column(db.Enum(UserStatus, name="user_status"), nullable=False, default=UserStatus.active)
     avatar_url = db.Column(db.String(500), nullable=True)
+    password_hash = db.Column(db.String(255), nullable=True)
     last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    def set_password(self, raw_password: str) -> None:
+        self.password_hash = generate_password_hash(raw_password)
+
+    def check_password(self, raw_password: str) -> bool:
+        if not self.password_hash:
+            return False
+        return check_password_hash(self.password_hash, raw_password)
 
     oauth_accounts = db.relationship("UserOauthAccount", back_populates="user", cascade="all, delete-orphan")
     otp_verifications = db.relationship("OtpVerification", back_populates="user", cascade="all, delete-orphan")
