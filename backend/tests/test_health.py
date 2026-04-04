@@ -6,7 +6,7 @@ class TestConfig:
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SECRET_KEY = "test"
-    JWT_SECRET_KEY = "test"
+    JWT_SECRET_KEY = "test-jwt-secret-key-with-32-plus-bytes"
 
 
 def test_health_endpoint():

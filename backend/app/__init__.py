@@ -1,5 +1,6 @@
 from flask import Flask
 
+from .api.auth import auth_bp
 from .api.health import health_bp
 from .config import Config
 from .extensions import db, jwt, migrate
@@ -15,6 +16,7 @@ def create_app(config_class=Config):
     migrate.init_app(app, db)
 
     app.register_blueprint(health_bp)
+    app.register_blueprint(auth_bp)
 
     return app
 
