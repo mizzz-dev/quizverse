@@ -36,11 +36,13 @@ flask --app app db upgrade
 cd backend && PYTHONPATH=. pytest
 ```
 
-## 認証API（ISSUE-0004, ISSUE-0005）
+## 認証API（ISSUE-0004, ISSUE-0005, ISSUE-0006）
 - JWT設定は環境変数で管理します（例: `JWT_SECRET_KEY`, `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`, `AUTH_ENABLE_DEV_TOKEN_ENDPOINT`）。
+- Google OAuth ログインを利用する場合は `GOOGLE_OAUTH_CLIENT_ID` を設定してください。
 - 本実装済みエンドポイント
   - `POST /api/auth/register`: メールアドレス・パスワードで新規登録しJWTを発行
   - `POST /api/auth/login`: メールアドレス・パスワードでJWTを発行
+  - `POST /api/auth/google`: Google ID token を検証し、OAuthログインでJWTを発行
   - `GET /api/auth/me`: JWTからログイン中ユーザーの基本情報を返却
 - 開発補助エンドポイント
   - `POST /api/auth/dev-token`: 開発/検証専用の仮トークン発行（`AUTH_ENABLE_DEV_TOKEN_ENDPOINT=true` の場合のみ）
@@ -55,9 +57,11 @@ cd backend && PYTHONPATH=. pytest
 - Issue: `docs/issues/ISSUE-0003.md`
 - Issue: `docs/issues/ISSUE-0004.md`
 - Issue: `docs/issues/ISSUE-0005.md`
+- Issue: `docs/issues/ISSUE-0006.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
 - Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
 - Qiita下書き: `docs/qiita/ISSUE-0003_mvp_db_design.md`
 - Qiita下書き: `docs/qiita/ISSUE-0004_jwt_auth_foundation.md`
 - Qiita下書き: `docs/qiita/ISSUE-0005_email_register_login.md`
+- Qiita下書き: `docs/qiita/ISSUE-0006_google_oauth_login.md`

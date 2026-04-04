@@ -11,7 +11,7 @@ from flask_jwt_extended import (
 from sqlalchemy import func
 
 from ..extensions import db, jwt
-from ..models import User
+from ..models import OauthProvider, User, UserOauthAccount
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
@@ -32,6 +32,11 @@ def _normalize_email(email: str) -> str:
 
 def _next_user_id() -> int:
     max_id = db.session.query(func.max(User.id)).scalar()
+    return int(max_id or 0) + 1
+
+
+def _next_user_oauth_account_id() -> int:
+    max_id = db.session.query(func.max(UserOauthAccount.id)).scalar()
     return int(max_id or 0) + 1
 
 
@@ -74,6 +79,17 @@ def _validate_register_payload(payload: dict):
         )
 
     return _normalize_email(email), password, normalized_display_name, None
+
+
+def _verify_google_id_token(raw_id_token: str, client_id: str):
+    from google.auth.transport.requests import Request as GoogleRequest
+    from google.oauth2 import id_token as google_id_token
+
+    return google_id_token.verify_oauth2_token(
+        raw_id_token,
+        GoogleRequest(),
+        client_id,
+    )
 
 
 @auth_bp.post("/register")
@@ -141,6 +157,127 @@ def login():
     access_token = create_access_token(
         identity=str(user.id),
         additional_claims={"scope": "user", "auth_method": "password"},
+    )
+
+    return (
+        jsonify(
+            {
+                "access_token": access_token,
+                "token_type": "Bearer",
+                "user": _serialize_user(user),
+            }
+        ),
+        200,
+    )
+
+
+@auth_bp.post("/google")
+def google_login():
+    payload = request.get_json(silent=True) or {}
+    raw_id_token = payload.get("id_token")
+    if not isinstance(raw_id_token, str) or not raw_id_token.strip():
+        return _error_response(
+            "auth/validation_error",
+            "id_token is required.",
+            400,
+        )
+
+    client_id = current_app.config.get("GOOGLE_OAUTH_CLIENT_ID")
+    if not client_id:
+        return _error_response(
+            "auth/google_oauth_not_configured",
+            "Google OAuth client id is not configured.",
+            500,
+        )
+
+    try:
+        claims = _verify_google_id_token(raw_id_token, client_id)
+    except ModuleNotFoundError:
+        return _error_response(
+            "auth/google_oauth_unavailable",
+            "Google OAuth dependency is unavailable.",
+            500,
+        )
+    except ValueError as exc:
+        return _error_response(
+            "auth/invalid_google_token",
+            "Google token verification failed.",
+            401,
+            detail=str(exc),
+        )
+
+    issuer = claims.get("iss")
+    if issuer not in {"accounts.google.com", "https://accounts.google.com"}:
+        return _error_response(
+            "auth/invalid_google_token",
+            "Google token issuer is invalid.",
+            401,
+        )
+
+    subject = claims.get("sub")
+    if not isinstance(subject, str) or not subject.strip():
+        return _error_response(
+            "auth/invalid_google_token",
+            "Google token subject is missing.",
+            401,
+        )
+
+    email = claims.get("email")
+    if not isinstance(email, str) or not EMAIL_REGEX.match(email.strip()):
+        return _error_response(
+            "auth/google_email_required",
+            "Google account email is required.",
+            400,
+        )
+
+    if claims.get("email_verified") is False:
+        return _error_response(
+            "auth/google_email_not_verified",
+            "Google account email is not verified.",
+            401,
+        )
+
+    normalized_email = _normalize_email(email)
+
+    oauth_account = UserOauthAccount.query.filter_by(
+        provider=OauthProvider.google,
+        provider_user_id=subject,
+    ).first()
+    if oauth_account:
+        user = oauth_account.user
+        oauth_account.provider_email = normalized_email
+    else:
+        user = User.query.filter(func.lower(User.email) == normalized_email).first()
+        if not user:
+            display_name = claims.get("name")
+            normalized_display_name = (
+                display_name.strip()
+                if isinstance(display_name, str) and display_name.strip()
+                else normalized_email.split("@")[0]
+            )
+            user = User(
+                id=_next_user_id(),
+                email=normalized_email,
+                display_name=normalized_display_name[:80],
+                avatar_url=claims.get("picture") if isinstance(claims.get("picture"), str) else None,
+            )
+            db.session.add(user)
+
+        oauth_account = UserOauthAccount(
+            id=_next_user_oauth_account_id(),
+            user=user,
+            provider=OauthProvider.google,
+            provider_user_id=subject,
+            provider_email=normalized_email,
+        )
+        db.session.add(oauth_account)
+
+    user.last_login_at = datetime.now(timezone.utc)
+    db.session.commit()
+
+    access_token = create_access_token(
+        identity=str(user.id),
+        additional_claims={"scope": "user", "auth_method": "google"},
     )
 
     return (
