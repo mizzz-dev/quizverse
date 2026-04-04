@@ -1,6 +1,8 @@
+from datetime import datetime, timedelta, timezone
+
 from app import create_app
 from app.extensions import db
-from app.models import OauthProvider, User, UserOauthAccount
+from app.models import OauthProvider, OtpVerification, User, UserOauthAccount
 
 
 class TestConfig:
@@ -11,6 +13,11 @@ class TestConfig:
     JWT_SECRET_KEY = "test-jwt-secret-key-with-32-plus-bytes"
     AUTH_ENABLE_DEV_TOKEN_ENDPOINT = True
     GOOGLE_OAUTH_CLIENT_ID = "google-client-id.apps.googleusercontent.com"
+    OTP_EXPIRES_SECONDS = 300
+    OTP_MIN_RESEND_SECONDS = 60
+    OTP_MAX_REQUESTS_PER_HOUR = 5
+    OTP_MAX_VERIFY_ATTEMPTS = 5
+    OTP_INCLUDE_CODE_IN_RESPONSE = True
 
 
 def _create_client(config=TestConfig):
@@ -49,7 +56,7 @@ def test_register_success_issues_access_token_and_hashes_password():
 
 
 def test_register_rejects_duplicate_email():
-    app, client = _create_client()
+    _app, client = _create_client()
 
     first_response = client.post(
         "/api/auth/register",
@@ -108,6 +115,145 @@ def test_login_fails_for_invalid_credentials():
 
     assert response.status_code == 401
     assert response.get_json()["error"]["code"] == "auth/invalid_credentials"
+
+
+def test_otp_request_and_verify_success_marks_code_consumed():
+    app, client = _create_client()
+
+    request_response = client.post(
+        "/api/auth/otp/request",
+        json={"channel": "email", "purpose": "login", "destination": "otp-user@example.com"},
+    )
+
+    assert request_response.status_code == 202
+    otp_code = request_response.get_json()["otp_code"]
+
+    verify_response = client.post(
+        "/api/auth/otp/verify",
+        json={
+            "channel": "email",
+            "purpose": "login",
+            "destination": "otp-user@example.com",
+            "code": otp_code,
+        },
+    )
+
+    assert verify_response.status_code == 200
+    assert verify_response.get_json()["status"] == "verified"
+
+    with app.app_context():
+        otp = OtpVerification.query.first()
+        assert otp is not None
+        assert otp.consumed_at is not None
+
+
+def test_otp_verify_rejects_wrong_code_and_increments_attempt_count():
+    app, client = _create_client()
+
+    request_response = client.post(
+        "/api/auth/otp/request",
+        json={"channel": "email", "purpose": "login", "destination": "wrong-code@example.com"},
+    )
+    assert request_response.status_code == 202
+
+    verify_response = client.post(
+        "/api/auth/otp/verify",
+        json={
+            "channel": "email",
+            "purpose": "login",
+            "destination": "wrong-code@example.com",
+            "code": "000000",
+        },
+    )
+
+    assert verify_response.status_code == 401
+    assert verify_response.get_json()["error"]["code"] == "auth/invalid_otp_code"
+
+    with app.app_context():
+        otp = OtpVerification.query.first()
+        assert otp is not None
+        assert otp.attempt_count == 1
+
+
+def test_otp_verify_rejects_expired_code():
+    app, client = _create_client()
+
+    request_response = client.post(
+        "/api/auth/otp/request",
+        json={"channel": "email", "purpose": "login", "destination": "expired@example.com"},
+    )
+    assert request_response.status_code == 202
+    otp_code = request_response.get_json()["otp_code"]
+
+    with app.app_context():
+        otp = OtpVerification.query.first()
+        otp.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.session.commit()
+
+    verify_response = client.post(
+        "/api/auth/otp/verify",
+        json={
+            "channel": "email",
+            "purpose": "login",
+            "destination": "expired@example.com",
+            "code": otp_code,
+        },
+    )
+
+    assert verify_response.status_code == 401
+    assert verify_response.get_json()["error"]["code"] == "auth/otp_expired"
+
+
+def test_otp_verify_rejects_reuse_of_consumed_code():
+    _app, client = _create_client()
+
+    request_response = client.post(
+        "/api/auth/otp/request",
+        json={"channel": "email", "purpose": "signup", "destination": "reuse@example.com"},
+    )
+    otp_code = request_response.get_json()["otp_code"]
+
+    first_verify = client.post(
+        "/api/auth/otp/verify",
+        json={"channel": "email", "purpose": "signup", "destination": "reuse@example.com", "code": otp_code},
+    )
+    second_verify = client.post(
+        "/api/auth/otp/verify",
+        json={"channel": "email", "purpose": "signup", "destination": "reuse@example.com", "code": otp_code},
+    )
+
+    assert first_verify.status_code == 200
+    assert second_verify.status_code == 401
+    assert second_verify.get_json()["error"]["code"] == "auth/otp_not_found"
+
+
+def test_otp_request_rate_limited_for_rapid_resend():
+    _app, client = _create_client()
+
+    first = client.post(
+        "/api/auth/otp/request",
+        json={"channel": "email", "purpose": "login", "destination": "ratelimit@example.com"},
+    )
+    second = client.post(
+        "/api/auth/otp/request",
+        json={"channel": "email", "purpose": "login", "destination": "ratelimit@example.com"},
+    )
+
+    assert first.status_code == 202
+    assert second.status_code == 429
+    assert second.get_json()["error"]["code"] == "auth/otp_rate_limited"
+
+
+def test_otp_phone_channel_returns_not_implemented():
+    _app, client = _create_client()
+
+    response = client.post(
+        "/api/auth/otp/request",
+        json={"channel": "phone", "purpose": "login", "destination": "+819012345678"},
+    )
+
+    assert response.status_code == 501
+    assert response.get_json()["error"]["code"] == "auth/otp_channel_not_implemented"
 
 
 def test_me_returns_authenticated_user_profile():

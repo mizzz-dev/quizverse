@@ -36,19 +36,23 @@ flask --app app db upgrade
 cd backend && PYTHONPATH=. pytest
 ```
 
-## 認証API（ISSUE-0004, ISSUE-0005, ISSUE-0006）
+## 認証API（ISSUE-0004, ISSUE-0005, ISSUE-0006, ISSUE-0007）
 - JWT設定は環境変数で管理します（例: `JWT_SECRET_KEY`, `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`, `AUTH_ENABLE_DEV_TOKEN_ENDPOINT`）。
+- OTP設定は環境変数で管理します（例: `OTP_EXPIRES_SECONDS`, `OTP_MIN_RESEND_SECONDS`, `OTP_MAX_REQUESTS_PER_HOUR`, `OTP_MAX_VERIFY_ATTEMPTS`）。
 - Google OAuth ログインを利用する場合は `GOOGLE_OAUTH_CLIENT_ID` を設定してください。
 - 本実装済みエンドポイント
   - `POST /api/auth/register`: メールアドレス・パスワードで新規登録しJWTを発行
   - `POST /api/auth/login`: メールアドレス・パスワードでJWTを発行
   - `POST /api/auth/google`: Google ID token を検証し、OAuthログインでJWTを発行
+  - `POST /api/auth/otp/request`: OTPコードを発行・保存し、メール送信基盤で送信（MVPではemailのみ対応）
+  - `POST /api/auth/otp/verify`: destination / purpose に紐づくOTPコードを検証し、成功時に使用済み化
   - `GET /api/auth/me`: JWTからログイン中ユーザーの基本情報を返却
 - 開発補助エンドポイント
   - `POST /api/auth/dev-token`: 開発/検証専用の仮トークン発行（`AUTH_ENABLE_DEV_TOKEN_ENDPOINT=true` の場合のみ）
 - 検証用保護ルート
   - `GET /api/auth/protected`: JWT必須の保護エンドポイント
 - `AUTH_ENABLE_DEV_TOKEN_ENDPOINT=false` を本番で明示設定し、`dev-token` を無効化してください。
+- `channel=phone` は将来拡張用のインターフェースのみで、MVPでは `auth/otp_channel_not_implemented` を返します。
 
 ## ドキュメント
 - ロードマップ: `docs/roadmap.md`
@@ -58,6 +62,7 @@ cd backend && PYTHONPATH=. pytest
 - Issue: `docs/issues/ISSUE-0004.md`
 - Issue: `docs/issues/ISSUE-0005.md`
 - Issue: `docs/issues/ISSUE-0006.md`
+- Issue: `docs/issues/ISSUE-0007.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
 - Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
@@ -65,3 +70,4 @@ cd backend && PYTHONPATH=. pytest
 - Qiita下書き: `docs/qiita/ISSUE-0004_jwt_auth_foundation.md`
 - Qiita下書き: `docs/qiita/ISSUE-0005_email_register_login.md`
 - Qiita下書き: `docs/qiita/ISSUE-0006_google_oauth_login.md`
+- Qiita下書き: `docs/qiita/ISSUE-0007_otp_verification_foundation.md`
