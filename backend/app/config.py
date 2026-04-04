@@ -12,5 +12,6 @@ class Config:
     AUTH_ENABLE_DEV_TOKEN_ENDPOINT = (
         os.getenv("AUTH_ENABLE_DEV_TOKEN_ENDPOINT", "true").lower() == "true"
     )
+    GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", "sqlite:///quizverse.db")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
