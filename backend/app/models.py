@@ -93,7 +93,7 @@ class UserOauthAccount(TimestampMixin, db.Model):
     )
 
     id = db.Column(db.BigInteger, primary_key=True)
-    user_id = db.Column(db.BigInteger, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = db.Column(db.BigInteger, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     provider = db.Column(db.Enum(OauthProvider, name="oauth_provider"), nullable=False)
     provider_user_id = db.Column(db.String(255), nullable=False)
     provider_email = db.Column(db.String(255), nullable=True)
@@ -105,9 +105,10 @@ class OtpVerification(TimestampMixin, db.Model):
     __tablename__ = "otp_verifications"
 
     id = db.Column(db.BigInteger, primary_key=True)
-    user_id = db.Column(db.BigInteger, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = db.Column(db.BigInteger, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     channel = db.Column(db.Enum(OtpChannel, name="otp_channel"), nullable=False)
     purpose = db.Column(db.Enum(OtpPurpose, name="otp_purpose"), nullable=False)
+    destination = db.Column(db.String(255), nullable=False)
     otp_hash = db.Column(db.String(255), nullable=False)
     expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
     consumed_at = db.Column(db.DateTime(timezone=True), nullable=True)
@@ -187,7 +188,7 @@ class LeaderboardSnapshot(TimestampMixin, db.Model):
     id = db.Column(db.BigInteger, primary_key=True)
     snapshot_date = db.Column(db.Date, nullable=False)
     quiz_id = db.Column(db.BigInteger, db.ForeignKey("quizzes.id", ondelete="CASCADE"), nullable=False)
-    user_id = db.Column(db.BigInteger, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = db.Column(db.BigInteger, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     rank = db.Column(db.Integer, nullable=False)
     score = db.Column(db.Integer, nullable=False)
     play_count = db.Column(db.Integer, nullable=False, default=0)

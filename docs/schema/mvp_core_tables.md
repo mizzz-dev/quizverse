@@ -18,8 +18,9 @@
 
 ### otp_verifications
 - OTP検証履歴。
+- `destination`（メールアドレス等）と `channel`（MVPはemail）で送信先を識別。
 - `purpose` を `login/signup/password_reset` で保持。
-- `attempt_count` で試行回数を管理。
+- `otp_hash`（ハッシュ保存）, `expires_at`, `consumed_at`, `attempt_count` で検証状態を管理。
 
 ### quizzes
 - クイズ本体。
@@ -53,6 +54,6 @@
 - 操作者、操作種別、対象エンティティ、メタ情報(JSON)を保持。
 
 ## 仮置き仕様（後続Issueで確定）
-- OTP送信チャネルは現時点で `email` のみ。
+- OTP送信チャネルは現時点で `email` のみ実装。`phone` はAPIインターフェースのみ先行。
 - ランキング集計バッチの実行タイミング（日次/時間単位）は未確定。
 - `audit_logs.metadata` の構造はイベントごとに運用で定義。
