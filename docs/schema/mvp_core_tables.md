@@ -34,6 +34,7 @@
 ### choices
 - 各設問の選択肢。
 - `is_correct` で正誤を表現。
+- ISSUE-0008 のMVP API仕様では1問あたり2〜6件、かつ正答は単一（`is_correct=true` は1件）をバリデーション。
 
 ### quiz_plays
 - ユーザーのプレイ単位のセッション。
@@ -54,6 +55,9 @@
 - 操作者、操作種別、対象エンティティ、メタ情報(JSON)を保持。
 
 ## 仮置き仕様（後続Issueで確定）
+
+- クイズ作成API（ISSUE-0008）は `POST /api/quizzes` で quiz/questions/choices を入力順 `sort_order` として一括登録。
+- クイズ作成時の `quizzes.status` は `draft` 固定（公開制御は後続Issue）。
 - OTP送信チャネルは現時点で `email` のみ実装。`phone` はAPIインターフェースのみ先行。
 - ランキング集計バッチの実行タイミング（日次/時間単位）は未確定。
 - `audit_logs.metadata` の構造はイベントごとに運用で定義。
