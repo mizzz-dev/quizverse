@@ -41,6 +41,7 @@ cd backend && PYTHONPATH=. pytest
 - OTP設定は環境変数で管理します（例: `OTP_EXPIRES_SECONDS`, `OTP_MIN_RESEND_SECONDS`, `OTP_MAX_REQUESTS_PER_HOUR`, `OTP_MAX_VERIFY_ATTEMPTS`）。
 - Google OAuth ログインを利用する場合は `GOOGLE_OAUTH_CLIENT_ID` を設定してください。
 - 本実装済みエンドポイント
+  - `POST /api/quizzes`: JWT必須。クイズ本体 + 問題 + 選択肢を一括作成（MVP: 4択等の選択式、各問題2〜6択、正答は1つ）
   - `POST /api/auth/register`: メールアドレス・パスワードで新規登録しJWTを発行
   - `POST /api/auth/login`: メールアドレス・パスワードでJWTを発行
   - `POST /api/auth/google`: Google ID token を検証し、OAuthログインでJWTを発行
@@ -63,6 +64,7 @@ cd backend && PYTHONPATH=. pytest
 - Issue: `docs/issues/ISSUE-0005.md`
 - Issue: `docs/issues/ISSUE-0006.md`
 - Issue: `docs/issues/ISSUE-0007.md`
+- Issue: `docs/issues/ISSUE-0008.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
 - Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
@@ -71,3 +73,4 @@ cd backend && PYTHONPATH=. pytest
 - Qiita下書き: `docs/qiita/ISSUE-0005_email_register_login.md`
 - Qiita下書き: `docs/qiita/ISSUE-0006_google_oauth_login.md`
 - Qiita下書き: `docs/qiita/ISSUE-0007_otp_verification_foundation.md`
+- Qiita下書き: `docs/qiita/ISSUE-0008_quiz_create_api.md`
