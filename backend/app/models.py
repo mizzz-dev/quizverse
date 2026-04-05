@@ -124,6 +124,7 @@ class Quiz(TimestampMixin, db.Model):
     author_user_id = db.Column(db.BigInteger, db.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     title = db.Column(db.String(120), nullable=False)
     description = db.Column(db.Text, nullable=True)
+    category = db.Column(db.String(80), nullable=True)
     status = db.Column(db.Enum(QuizStatus, name="quiz_status"), nullable=False, default=QuizStatus.draft)
     time_limit_seconds = db.Column(db.Integer, nullable=True)
     published_at = db.Column(db.DateTime(timezone=True), nullable=True)

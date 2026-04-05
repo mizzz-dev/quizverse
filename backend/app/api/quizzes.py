@@ -1,9 +1,9 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from ..extensions import db
-from ..models import Choice, Question, Quiz, QuizStatus
+from ..models import Choice, Question, Quiz, QuizStatus, User
 
 quizzes_bp = Blueprint("quizzes", __name__, url_prefix="/api/quizzes")
 
@@ -12,10 +12,15 @@ QUIZ_DESCRIPTION_MAX_LENGTH = 2000
 QUESTION_BODY_MAX_LENGTH = 2000
 QUESTION_EXPLANATION_MAX_LENGTH = 4000
 CHOICE_BODY_MAX_LENGTH = 1000
+CATEGORY_MAX_LENGTH = 80
+QUERY_MAX_LENGTH = 120
 MIN_QUESTIONS = 1
 MAX_QUESTIONS = 50
 MIN_CHOICES_PER_QUESTION = 2
 MAX_CHOICES_PER_QUESTION = 6
+DEFAULT_PAGE = 1
+DEFAULT_PER_PAGE = 20
+MAX_PER_PAGE = 50
 
 
 def _error_response(code: str, message: str, status_code: int, detail: str | None = None):
@@ -43,6 +48,7 @@ def _next_choice_id() -> int:
 def _validate_create_quiz_payload(payload: dict):
     title = payload.get("title")
     description = payload.get("description")
+    category = payload.get("category")
     questions = payload.get("questions")
 
     if not isinstance(title, str) or not title.strip():
@@ -62,6 +68,16 @@ def _validate_create_quiz_payload(payload: dict):
         return None, _error_response(
             "quiz/validation_error",
             f"description must be {QUIZ_DESCRIPTION_MAX_LENGTH} characters or fewer.",
+            400,
+        )
+
+    if category is not None and not isinstance(category, str):
+        return None, _error_response("quiz/validation_error", "category must be a string.", 400)
+    normalized_category = category.strip() if isinstance(category, str) and category.strip() else None
+    if normalized_category and len(normalized_category) > CATEGORY_MAX_LENGTH:
+        return None, _error_response(
+            "quiz/validation_error",
+            f"category must be {CATEGORY_MAX_LENGTH} characters or fewer.",
             400,
         )
 
@@ -198,8 +214,232 @@ def _validate_create_quiz_payload(payload: dict):
     return {
         "title": normalized_title,
         "description": normalized_description,
+        "category": normalized_category,
         "questions": normalized_questions,
     }, None
+
+
+def _validate_list_query_params(query_params):
+    q = query_params.get("q")
+    category = query_params.get("category")
+    page_raw = query_params.get("page", str(DEFAULT_PAGE))
+    per_page_raw = query_params.get("per_page", str(DEFAULT_PER_PAGE))
+
+    if q is not None:
+        if not isinstance(q, str):
+            return None, _error_response("quiz/validation_error", "q must be a string.", 400)
+        q = q.strip()
+        if len(q) > QUERY_MAX_LENGTH:
+            return None, _error_response(
+                "quiz/validation_error",
+                f"q must be {QUERY_MAX_LENGTH} characters or fewer.",
+                400,
+            )
+        if not q:
+            q = None
+
+    if category is not None:
+        if not isinstance(category, str):
+            return None, _error_response("quiz/validation_error", "category must be a string.", 400)
+        category = category.strip()
+        if len(category) > CATEGORY_MAX_LENGTH:
+            return None, _error_response(
+                "quiz/validation_error",
+                f"category must be {CATEGORY_MAX_LENGTH} characters or fewer.",
+                400,
+            )
+        if not category:
+            category = None
+
+    try:
+        page = int(page_raw)
+    except (TypeError, ValueError):
+        return None, _error_response("quiz/validation_error", "page must be an integer.", 400)
+    if page < 1:
+        return None, _error_response("quiz/validation_error", "page must be 1 or greater.", 400)
+
+    try:
+        per_page = int(per_page_raw)
+    except (TypeError, ValueError):
+        return None, _error_response("quiz/validation_error", "per_page must be an integer.", 400)
+    if per_page < 1 or per_page > MAX_PER_PAGE:
+        return None, _error_response(
+            "quiz/validation_error",
+            f"per_page must be between 1 and {MAX_PER_PAGE}.",
+            400,
+        )
+
+    return {"q": q, "category": category, "page": page, "per_page": per_page}, None
+
+
+def _description_summary(description: str | None, max_length: int = 160):
+    if description is None:
+        return None
+    if len(description) <= max_length:
+        return description
+    return f"{description[: max_length - 1]}…"
+
+
+def _serialize_quiz_list_item(quiz: Quiz, author_display_name: str | None, question_count: int):
+    return {
+        "id": str(quiz.id),
+        "title": quiz.title,
+        "description_summary": _description_summary(quiz.description),
+        "category": quiz.category,
+        "question_count": int(question_count),
+        "created_at": quiz.created_at.isoformat() if quiz.created_at else None,
+        "author": {
+            "id": str(quiz.author_user_id),
+            "display_name": author_display_name,
+        },
+    }
+
+
+def _serialize_quiz_detail(quiz: Quiz, author_display_name: str | None, questions_with_choices):
+    return {
+        "id": str(quiz.id),
+        "title": quiz.title,
+        "description": quiz.description,
+        "category": quiz.category,
+        "status": quiz.status.value,
+        "created_at": quiz.created_at.isoformat() if quiz.created_at else None,
+        "author": {
+            "id": str(quiz.author_user_id),
+            "display_name": author_display_name,
+        },
+        "question_count": len(questions_with_choices),
+        "questions": questions_with_choices,
+    }
+
+
+@quizzes_bp.get("")
+def list_quizzes():
+    validated, validation_error = _validate_list_query_params(request.args)
+    if validation_error:
+        return validation_error
+
+    page = validated["page"]
+    per_page = validated["per_page"]
+    offset = (page - 1) * per_page
+
+    base_query = (
+        db.session.query(
+            Quiz,
+            User.display_name,
+            func.count(Question.id).label("question_count"),
+        )
+        .join(User, User.id == Quiz.author_user_id)
+        .outerjoin(Question, Question.quiz_id == Quiz.id)
+        .group_by(Quiz.id, User.display_name)
+    )
+
+    if validated["q"]:
+        pattern = f"%{validated['q']}%"
+        base_query = base_query.filter(
+            or_(
+                Quiz.title.ilike(pattern),
+                Quiz.description.ilike(pattern),
+            )
+        )
+    if validated["category"]:
+        base_query = base_query.filter(Quiz.category == validated["category"])
+
+    total = (
+        db.session.query(func.count(Quiz.id))
+        .select_from(Quiz)
+        .join(User, User.id == Quiz.author_user_id)
+    )
+    if validated["q"]:
+        pattern = f"%{validated['q']}%"
+        total = total.filter(
+            or_(
+                Quiz.title.ilike(pattern),
+                Quiz.description.ilike(pattern),
+            )
+        )
+    if validated["category"]:
+        total = total.filter(Quiz.category == validated["category"])
+    total_count = int(total.scalar() or 0)
+
+    quizzes = (
+        base_query.order_by(Quiz.created_at.desc(), Quiz.id.desc())
+        .offset(offset)
+        .limit(per_page)
+        .all()
+    )
+
+    items = [
+        _serialize_quiz_list_item(quiz, author_display_name, question_count)
+        for quiz, author_display_name, question_count in quizzes
+    ]
+
+    return jsonify(
+        {
+            "items": items,
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": total_count,
+                "total_pages": (total_count + per_page - 1) // per_page if total_count else 0,
+            },
+            "filters": {
+                "q": validated["q"],
+                "category": validated["category"],
+            },
+        }
+    )
+
+
+@quizzes_bp.get("/<int:quiz_id>")
+def get_quiz_detail(quiz_id: int):
+    quiz_with_author = (
+        db.session.query(Quiz, User.display_name)
+        .join(User, User.id == Quiz.author_user_id)
+        .filter(Quiz.id == quiz_id)
+        .first()
+    )
+    if not quiz_with_author:
+        return _error_response("quiz/not_found", "Quiz not found.", 404)
+
+    quiz, author_display_name = quiz_with_author
+
+    questions = (
+        Question.query.filter_by(quiz_id=quiz.id)
+        .order_by(Question.sort_order.asc(), Question.id.asc())
+        .all()
+    )
+    question_ids = [question.id for question in questions]
+    choices = (
+        Choice.query.filter(Choice.question_id.in_(question_ids))
+        .order_by(Choice.sort_order.asc(), Choice.id.asc())
+        .all()
+        if question_ids
+        else []
+    )
+
+    choices_by_question_id = {}
+    for choice in choices:
+        choices_by_question_id.setdefault(choice.question_id, []).append(choice)
+
+    questions_with_choices = [
+        {
+            "id": str(question.id),
+            "body": question.body,
+            "explanation": question.explanation,
+            "sort_order": question.sort_order,
+            "choices": [
+                {
+                    "id": str(choice.id),
+                    "body": choice.body,
+                    "sort_order": choice.sort_order,
+                }
+                for choice in choices_by_question_id.get(question.id, [])
+            ],
+        }
+        for question in questions
+    ]
+
+    return jsonify({"quiz": _serialize_quiz_detail(quiz, author_display_name, questions_with_choices)})
 
 
 @quizzes_bp.post("")
@@ -218,6 +458,7 @@ def create_quiz():
             author_user_id=int(user_id),
             title=validated["title"],
             description=validated["description"],
+            category=validated["category"],
             status=QuizStatus.draft,
         )
         db.session.add(quiz)
@@ -263,6 +504,7 @@ def create_quiz():
                     "id": str(quiz.id),
                     "title": quiz.title,
                     "description": quiz.description,
+                    "category": quiz.category,
                     "status": quiz.status.value,
                     "author_user_id": str(quiz.author_user_id),
                     "question_count": len(validated["questions"]),
