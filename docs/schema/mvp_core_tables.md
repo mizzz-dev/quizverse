@@ -26,6 +26,7 @@
 - クイズ本体。
 - 作成者は `author_user_id`。
 - `status` は `draft/published/archived`。
+- ISSUE-0009 で `category`（文字列, nullable）を追加し、一覧APIでのカテゴリ完全一致フィルタに利用。
 
 ### questions
 - クイズ設問。
@@ -57,6 +58,7 @@
 ## 仮置き仕様（後続Issueで確定）
 
 - クイズ作成API（ISSUE-0008）は `POST /api/quizzes` で quiz/questions/choices を入力順 `sort_order` として一括登録。
+- クイズ一覧/詳細API（ISSUE-0009）は公開向けレスポンスで正答情報を返さない。
 - クイズ作成時の `quizzes.status` は `draft` 固定（公開制御は後続Issue）。
 - OTP送信チャネルは現時点で `email` のみ実装。`phone` はAPIインターフェースのみ先行。
 - ランキング集計バッチの実行タイミング（日次/時間単位）は未確定。
