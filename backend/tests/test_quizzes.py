@@ -1,6 +1,6 @@
 from app import create_app
 from app.extensions import db
-from app.models import Choice, Question, Quiz
+from app.models import Choice, Question, Quiz, QuizPlay, QuizPlayAnswer
 
 
 class TestConfig:
@@ -304,3 +304,176 @@ def test_get_quiz_detail_returns_not_found_when_quiz_is_missing():
 
     assert response.status_code == 404
     assert response.get_json()["error"]["code"] == "quiz/not_found"
+
+
+def test_submit_quiz_play_scores_and_persists_play_history():
+    app, client = _create_client()
+    token = _register_and_token(client, email="player@example.com", display_name="Player")
+
+    create_response = _create_quiz(
+        client,
+        token,
+        title="Math & Science",
+        questions=[
+            {
+                "body": "2 + 2 = ?",
+                "choices": [
+                    {"body": "3", "is_correct": False},
+                    {"body": "4", "is_correct": True},
+                ],
+            },
+            {
+                "body": "Earth is a?",
+                "choices": [
+                    {"body": "Planet", "is_correct": True},
+                    {"body": "Star", "is_correct": False},
+                ],
+            },
+        ],
+    )
+    quiz_id = create_response.get_json()["quiz"]["id"]
+
+    detail_response = client.get(f"/api/quizzes/{quiz_id}")
+    questions = detail_response.get_json()["quiz"]["questions"]
+    q1 = questions[0]
+    q2 = questions[1]
+    q1_correct = q1["choices"][1]["id"]
+    q2_incorrect = q2["choices"][1]["id"]
+
+    submit_response = client.post(
+        f"/api/quizzes/{quiz_id}/play",
+        headers=_auth_header(token),
+        json={
+            "answers": [
+                {"question_id": q1["id"], "selected_choice_id": q1_correct},
+                {"question_id": q2["id"], "selected_choice_id": q2_incorrect},
+            ]
+        },
+    )
+
+    assert submit_response.status_code == 201
+    play = submit_response.get_json()["play"]
+    assert play["quiz_id"] == quiz_id
+    assert play["correct_count"] == 1
+    assert play["incorrect_count"] == 1
+    assert play["skipped_count"] == 0
+    assert play["total_questions"] == 2
+    assert play["score"] == 1
+    assert play["score_percentage"] == 50.0
+
+    with app.app_context():
+        play_row = QuizPlay.query.first()
+        assert play_row is not None
+        assert play_row.quiz_id == int(quiz_id)
+        assert play_row.score == 1
+        answer_rows = QuizPlayAnswer.query.order_by(QuizPlayAnswer.question_id.asc()).all()
+        assert len(answer_rows) == 2
+        assert answer_rows[0].quiz_play_id == play_row.id
+
+
+def test_submit_quiz_play_requires_jwt():
+    _app, client = _create_client()
+
+    response = client.post("/api/quizzes/1/play", json={"answers": []})
+
+    assert response.status_code == 401
+
+
+def test_submit_quiz_play_rejects_unknown_question_id():
+    _app, client = _create_client()
+    token = _register_and_token(client, email="unknown-question@example.com")
+
+    create_response = _create_quiz(client, token, title="Unknown Question Quiz")
+    quiz_id = create_response.get_json()["quiz"]["id"]
+
+    response = client.post(
+        f"/api/quizzes/{quiz_id}/play",
+        headers=_auth_header(token),
+        json={"answers": [{"question_id": 99999, "selected_choice_id": 1}]},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "quiz/invalid_answer"
+
+
+def test_submit_quiz_play_rejects_choice_from_another_quiz():
+    _app, client = _create_client()
+    token = _register_and_token(client, email="cross-quiz@example.com")
+
+    quiz_1 = _create_quiz(client, token, title="Quiz A").get_json()["quiz"]["id"]
+    quiz_2 = _create_quiz(client, token, title="Quiz B").get_json()["quiz"]["id"]
+
+    quiz_1_detail = client.get(f"/api/quizzes/{quiz_1}").get_json()["quiz"]
+    quiz_2_detail = client.get(f"/api/quizzes/{quiz_2}").get_json()["quiz"]
+
+    q1_id = quiz_1_detail["questions"][0]["id"]
+    quiz_2_choice_id = quiz_2_detail["questions"][0]["choices"][0]["id"]
+
+    response = client.post(
+        f"/api/quizzes/{quiz_1}/play",
+        headers=_auth_header(token),
+        json={
+            "answers": [
+                {"question_id": q1_id, "selected_choice_id": quiz_2_choice_id},
+            ]
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "quiz/invalid_answer"
+
+
+def test_submit_quiz_play_allows_unanswered_questions_as_skipped():
+    app, client = _create_client()
+    token = _register_and_token(client, email="skipped@example.com")
+
+    quiz_id = _create_quiz(
+        client,
+        token,
+        title="Skip Quiz",
+        questions=[
+            {
+                "body": "Q1",
+                "choices": [
+                    {"body": "A", "is_correct": True},
+                    {"body": "B", "is_correct": False},
+                ],
+            },
+            {
+                "body": "Q2",
+                "choices": [
+                    {"body": "A", "is_correct": True},
+                    {"body": "B", "is_correct": False},
+                ],
+            },
+        ],
+    ).get_json()["quiz"]["id"]
+
+    quiz_detail = client.get(f"/api/quizzes/{quiz_id}").get_json()["quiz"]
+    first_question = quiz_detail["questions"][0]
+    first_correct_choice_id = first_question["choices"][0]["id"]
+
+    response = client.post(
+        f"/api/quizzes/{quiz_id}/play",
+        headers=_auth_header(token),
+        json={
+            "answers": [
+                {
+                    "question_id": first_question["id"],
+                    "selected_choice_id": first_correct_choice_id,
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 201
+    play = response.get_json()["play"]
+    assert play["correct_count"] == 1
+    assert play["skipped_count"] == 1
+    assert play["score"] == 1
+    assert play["score_percentage"] == 50.0
+
+    with app.app_context():
+        answers = QuizPlayAnswer.query.all()
+        assert len(answers) == 2
+        assert sum(1 for answer in answers if answer.selected_choice_id is None) == 1
