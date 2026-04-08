@@ -44,6 +44,7 @@ cd backend && PYTHONPATH=. pytest
   - `POST /api/quizzes`: JWT必須。クイズ本体 + 問題 + 選択肢を一括作成（MVP: 4択等の選択式、各問題2〜6択、正答は1つ）
   - `GET /api/quizzes`: クイズ一覧を取得（`q` キーワード検索, `category` 完全一致, `page`/`per_page` ページング）
   - `GET /api/quizzes/{quiz_id}`: クイズ詳細を取得（問題・選択肢を返却、正答は返さない）
+  - `POST /api/quizzes/{quiz_id}/play`: JWT必須。回答送信・採点・プレイ履歴保存（`quiz_plays`/`quiz_play_answers`）
   - `POST /api/auth/register`: メールアドレス・パスワードで新規登録しJWTを発行
   - `POST /api/auth/login`: メールアドレス・パスワードでJWTを発行
   - `POST /api/auth/google`: Google ID token を検証し、OAuthログインでJWTを発行
@@ -68,6 +69,7 @@ cd backend && PYTHONPATH=. pytest
 - Issue: `docs/issues/ISSUE-0007.md`
 - Issue: `docs/issues/ISSUE-0008.md`
 - Issue: `docs/issues/ISSUE-0009.md`
+- Issue: `docs/issues/ISSUE-0010.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
 - Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
@@ -78,3 +80,4 @@ cd backend && PYTHONPATH=. pytest
 - Qiita下書き: `docs/qiita/ISSUE-0007_otp_verification_foundation.md`
 - Qiita下書き: `docs/qiita/ISSUE-0008_quiz_create_api.md`
 - Qiita下書き: `docs/qiita/ISSUE-0009_quiz_list_search_detail_api.md`
+- Qiita下書き: `docs/qiita/ISSUE-0010_quiz_play_scoring_api.md`

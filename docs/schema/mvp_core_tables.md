@@ -41,11 +41,13 @@
 - ユーザーのプレイ単位のセッション。
 - `status` は `started/submitted/abandoned`。
 - スコア・正解数などを保持。
+- ISSUE-0010 で `POST /api/quizzes/{quiz_id}/play` から保存される。
 
 ### quiz_play_answers
 - 各設問に対する回答履歴。
 - `selected_choice_id` はスキップ時にNULL許容。
 - `result` は `correct/incorrect/skipped`。
+- ISSUE-0010 では回答順ではなく `question_id` 基準で採点し、全設問ぶん保存する。
 
 ### leaderboard_snapshots
 - 日次・クイズ単位のランキングスナップショット。
@@ -59,6 +61,7 @@
 
 - クイズ作成API（ISSUE-0008）は `POST /api/quizzes` で quiz/questions/choices を入力順 `sort_order` として一括登録。
 - クイズ一覧/詳細API（ISSUE-0009）は公開向けレスポンスで正答情報を返さない。
+- クイズ回答API（ISSUE-0010）はJWT必須で、未回答設問は `skipped` として保存する（仮置き）。
 - クイズ作成時の `quizzes.status` は `draft` 固定（公開制御は後続Issue）。
 - OTP送信チャネルは現時点で `email` のみ実装。`phone` はAPIインターフェースのみ先行。
 - ランキング集計バッチの実行タイミング（日次/時間単位）は未確定。

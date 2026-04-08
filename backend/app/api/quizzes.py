@@ -1,9 +1,21 @@
+from datetime import datetime, timezone
+
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy import func, or_
 
 from ..extensions import db
-from ..models import Choice, Question, Quiz, QuizStatus, User
+from ..models import (
+    AnswerResult,
+    Choice,
+    PlayStatus,
+    Question,
+    Quiz,
+    QuizPlay,
+    QuizPlayAnswer,
+    QuizStatus,
+    User,
+)
 
 quizzes_bp = Blueprint("quizzes", __name__, url_prefix="/api/quizzes")
 
@@ -21,6 +33,86 @@ MAX_CHOICES_PER_QUESTION = 6
 DEFAULT_PAGE = 1
 DEFAULT_PER_PAGE = 20
 MAX_PER_PAGE = 50
+
+
+def _parse_int(value, field_name: str):
+    try:
+        return int(value), None
+    except (TypeError, ValueError):
+        return None, _error_response("quiz/validation_error", f"{field_name} must be an integer.", 400)
+
+
+def _validate_play_payload(payload: dict):
+    answers = payload.get("answers")
+    if not isinstance(answers, list):
+        return None, _error_response("quiz/validation_error", "answers is required and must be an array.", 400)
+
+    normalized_answers = []
+    seen_question_ids = set()
+    for index, answer in enumerate(answers, start=1):
+        if not isinstance(answer, dict):
+            return None, _error_response("quiz/validation_error", f"answers[{index}] must be an object.", 400)
+
+        if "question_id" not in answer:
+            return None, _error_response("quiz/validation_error", f"answers[{index}].question_id is required.", 400)
+
+        question_id, question_err = _parse_int(answer.get("question_id"), f"answers[{index}].question_id")
+        if question_err:
+            return None, question_err
+
+        if question_id in seen_question_ids:
+            return None, _error_response(
+                "quiz/validation_error",
+                f"answers[{index}].question_id is duplicated.",
+                400,
+            )
+        seen_question_ids.add(question_id)
+
+        selected_choice_raw = answer.get("selected_choice_id")
+        if selected_choice_raw is None:
+            selected_choice_id = None
+        else:
+            selected_choice_id, choice_err = _parse_int(
+                selected_choice_raw,
+                f"answers[{index}].selected_choice_id",
+            )
+            if choice_err:
+                return None, choice_err
+
+        normalized_answers.append(
+            {"question_id": question_id, "selected_choice_id": selected_choice_id}
+        )
+
+    return {"answers": normalized_answers}, None
+
+
+def _next_quiz_play_id() -> int:
+    max_id = db.session.query(func.max(QuizPlay.id)).scalar()
+    return int(max_id or 0) + 1
+
+
+def _next_quiz_play_answer_id() -> int:
+    max_id = db.session.query(func.max(QuizPlayAnswer.id)).scalar()
+    return int(max_id or 0) + 1
+
+
+def _calculate_score(answer_results, questions):
+    possible_score = sum(question.points for question in questions)
+    score = sum(result["points_awarded"] for result in answer_results)
+    correct_count = sum(1 for result in answer_results if result["result"] == AnswerResult.correct.value)
+    total_questions = len(questions)
+    incorrect_count = sum(1 for result in answer_results if result["result"] == AnswerResult.incorrect.value)
+    skipped_count = sum(1 for result in answer_results if result["result"] == AnswerResult.skipped.value)
+    score_percentage = round((score / possible_score) * 100, 2) if possible_score > 0 else 0.0
+
+    return {
+        "score": score,
+        "correct_count": correct_count,
+        "total_questions": total_questions,
+        "incorrect_count": incorrect_count,
+        "skipped_count": skipped_count,
+        "score_percentage": score_percentage,
+    }
 
 
 def _error_response(code: str, message: str, status_code: int, detail: str | None = None):
@@ -440,6 +532,165 @@ def get_quiz_detail(quiz_id: int):
     ]
 
     return jsonify({"quiz": _serialize_quiz_detail(quiz, author_display_name, questions_with_choices)})
+
+
+@quizzes_bp.post("/<int:quiz_id>/play")
+@jwt_required()
+def submit_quiz_play(quiz_id: int):
+    payload = request.get_json(silent=True) or {}
+    validated, validation_error = _validate_play_payload(payload)
+    if validation_error:
+        return validation_error
+
+    quiz = Quiz.query.filter_by(id=quiz_id).first()
+    if not quiz:
+        return _error_response("quiz/not_found", "Quiz not found.", 404)
+
+    questions = (
+        Question.query.filter_by(quiz_id=quiz.id)
+        .order_by(Question.sort_order.asc(), Question.id.asc())
+        .all()
+    )
+    if not questions:
+        return _error_response("quiz/invalid_state", "Quiz has no questions.", 409)
+
+    questions_by_id = {question.id: question for question in questions}
+    answer_by_question_id = {answer["question_id"]: answer["selected_choice_id"] for answer in validated["answers"]}
+
+    unknown_question_ids = sorted(set(answer_by_question_id.keys()) - set(questions_by_id.keys()))
+    if unknown_question_ids:
+        return _error_response(
+            "quiz/invalid_answer",
+            "answers contains question_id that does not belong to this quiz.",
+            400,
+            detail=f"question_ids={unknown_question_ids}",
+        )
+
+    all_choices = (
+        Choice.query.filter(Choice.question_id.in_(questions_by_id.keys()))
+        .order_by(Choice.id.asc())
+        .all()
+    )
+    choices_by_id = {choice.id: choice for choice in all_choices}
+
+    submitted_choice_ids = {
+        selected_choice_id
+        for selected_choice_id in answer_by_question_id.values()
+        if selected_choice_id is not None
+    }
+    unknown_choice_ids = sorted(choice_id for choice_id in submitted_choice_ids if choice_id not in choices_by_id)
+    if unknown_choice_ids:
+        return _error_response(
+            "quiz/invalid_answer",
+            "answers contains selected_choice_id that does not belong to this quiz.",
+            400,
+            detail=f"choice_ids={unknown_choice_ids}",
+        )
+
+    answer_results = []
+    for question in questions:
+        selected_choice_id = answer_by_question_id.get(question.id)
+        if selected_choice_id is None:
+            result = AnswerResult.skipped.value
+            points_awarded = 0
+        else:
+            selected_choice = choices_by_id[selected_choice_id]
+            if selected_choice.question_id != question.id:
+                return _error_response(
+                    "quiz/invalid_answer",
+                    "selected_choice_id does not match the provided question_id.",
+                    400,
+                    detail=(
+                        f"question_id={question.id}, selected_choice_id={selected_choice_id}, "
+                        f"choice_question_id={selected_choice.question_id}"
+                    ),
+                )
+            if selected_choice.is_correct:
+                result = AnswerResult.correct.value
+                points_awarded = question.points
+            else:
+                result = AnswerResult.incorrect.value
+                points_awarded = 0
+
+        answer_results.append(
+            {
+                "question_id": question.id,
+                "selected_choice_id": selected_choice_id,
+                "result": result,
+                "points_awarded": points_awarded,
+            }
+        )
+
+    score_summary = _calculate_score(answer_results, questions)
+    user_id = int(get_jwt_identity())
+
+    try:
+        now = datetime.now(timezone.utc)
+        quiz_play = QuizPlay(
+            id=_next_quiz_play_id(),
+            quiz_id=quiz.id,
+            player_user_id=user_id,
+            status=PlayStatus.submitted,
+            started_at=now,
+            submitted_at=now,
+            score=score_summary["score"],
+            correct_answers=score_summary["correct_count"],
+            total_questions=score_summary["total_questions"],
+        )
+        db.session.add(quiz_play)
+
+        next_answer_id = _next_quiz_play_answer_id()
+        for answer_result in answer_results:
+            play_answer = QuizPlayAnswer(
+                id=next_answer_id,
+                quiz_play_id=quiz_play.id,
+                question_id=answer_result["question_id"],
+                selected_choice_id=answer_result["selected_choice_id"],
+                result=AnswerResult(answer_result["result"]),
+                points_awarded=answer_result["points_awarded"],
+                answered_at=now,
+            )
+            db.session.add(play_answer)
+            next_answer_id += 1
+
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        return _error_response("quiz/play_submit_failed", "Failed to submit quiz play.", 500)
+
+    return (
+        jsonify(
+            {
+                "play": {
+                    "id": str(quiz_play.id),
+                    "quiz_id": str(quiz.id),
+                    "player_user_id": str(user_id),
+                    "status": quiz_play.status.value,
+                    "correct_count": score_summary["correct_count"],
+                    "incorrect_count": score_summary["incorrect_count"],
+                    "skipped_count": score_summary["skipped_count"],
+                    "total_questions": score_summary["total_questions"],
+                    "score": score_summary["score"],
+                    "score_percentage": score_summary["score_percentage"],
+                    "submitted_at": quiz_play.submitted_at.isoformat() if quiz_play.submitted_at else None,
+                    "answers": [
+                        {
+                            "question_id": str(answer_result["question_id"]),
+                            "selected_choice_id": (
+                                str(answer_result["selected_choice_id"])
+                                if answer_result["selected_choice_id"] is not None
+                                else None
+                            ),
+                            "result": answer_result["result"],
+                            "points_awarded": answer_result["points_awarded"],
+                        }
+                        for answer_result in answer_results
+                    ],
+                }
+            }
+        ),
+        201,
+    )
 
 
 @quizzes_bp.post("")
