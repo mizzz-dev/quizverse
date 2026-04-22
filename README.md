@@ -40,6 +40,7 @@ cd backend && PYTHONPATH=. pytest
 - JWT設定は環境変数で管理します（例: `JWT_SECRET_KEY`, `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`, `AUTH_ENABLE_DEV_TOKEN_ENDPOINT`）。
 - OTP設定は環境変数で管理します（例: `OTP_EXPIRES_SECONDS`, `OTP_MIN_RESEND_SECONDS`, `OTP_MAX_REQUESTS_PER_HOUR`, `OTP_MAX_VERIFY_ATTEMPTS`）。
 - Google OAuth ログインを利用する場合は `GOOGLE_OAUTH_CLIENT_ID` を設定してください。
+- メール設定暗号化キーは `EMAIL_SETTINGS_ENCRYPTION_KEY` で指定できます。未指定時は `SECRET_KEY` から導出した鍵を仮利用します。
 - 本実装済みエンドポイント
   - `POST /api/quizzes`: JWT必須。クイズ本体 + 問題 + 選択肢を一括作成（MVP: 4択等の選択式、各問題2〜6択、正答は1つ）
   - `GET /api/quizzes`: クイズ一覧を取得（`q` キーワード検索, `category` 完全一致, `page`/`per_page` ページング）
@@ -50,6 +51,8 @@ cd backend && PYTHONPATH=. pytest
   - `GET /api/admin/overview`: 管理ダッシュボード向けサマリー（ユーザー数 / クイズ数 / プレイ数 / サービス状況）
   - `GET /api/admin/users`: 管理向けユーザー一覧（emailはマスクした値のみ返却）
   - `GET /api/admin/quizzes`: 管理向けクイズ一覧（作成者・ステータス・プレイ数）
+  - `GET /api/admin/email-settings`: 管理向けメール設定取得（機密値はマスクのみ返却、`X-Admin-Mode: true` が必要）
+  - `PUT /api/admin/email-settings`: 管理向けメール設定保存（SMTPパスワードは更新時のみ受け取り）
   - `POST /api/auth/register`: メールアドレス・パスワードで新規登録しJWTを発行
   - `POST /api/auth/login`: メールアドレス・パスワードでJWTを発行
   - `POST /api/auth/google`: Google ID token を検証し、OAuthログインでJWTを発行
@@ -77,6 +80,7 @@ cd backend && PYTHONPATH=. pytest
 - Issue: `docs/issues/ISSUE-0010.md`
 - Issue: `docs/issues/ISSUE-0011.md`
 - Issue: `docs/issues/ISSUE-0014.md`
+- Issue: `docs/issues/ISSUE-0015.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
 - Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
@@ -90,9 +94,16 @@ cd backend && PYTHONPATH=. pytest
 - Qiita下書き: `docs/qiita/ISSUE-0010_quiz_play_scoring_api.md`
 - Qiita下書き: `docs/qiita/ISSUE-0011_ranking_api.md`
 - Qiita下書き: `docs/qiita/ISSUE-0014_admin_dashboard_foundation.md`
+- Qiita下書き: `docs/qiita/ISSUE-0015_email_settings_ui_and_smtp_api.md`
 
 ## フロントエンド（管理ダッシュボード / ISSUE-0014）
 - `/admin` 配下に管理ダッシュボード基盤を追加しました。
 - 仮置きの admin 判定として `localStorage["quizverse_is_admin"]` を利用します。
 - 初回アクセス時は一般ユーザー扱いのため、画面内トグルで管理者モードへ切り替えて確認してください。
 - MVPとして、ローディング（skeleton）/ 空状態 / エラー状態を基本実装しています。
+
+## フロントエンド（メール設定 / ISSUE-0015）
+- 管理画面のメール設定ルートを `/admin/settings/email` として実装。
+- SMTP設定は管理APIと連携し、ローディング・保存成功・エラー表示を行う。
+- SMTPパスワードは取得時に平文を返さず、変更時のみ送信する。
+- 管理APIの権限判定は **仮置き** として `X-Admin-Mode: true` を利用。

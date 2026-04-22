@@ -53,6 +53,11 @@
 - 日次・クイズ単位のランキングスナップショット。
 - `snapshot_date + quiz_id + user_id` ユニーク。
 
+### email_settings
+- ISSUE-0015で追加した管理向けメール設定テーブル（単一レコード運用）。
+- 送信元情報、SMTP接続情報、TLS/SSL利用フラグを保持。
+- `smtp_password_encrypted` は平文を保持せず、アプリケーションレイヤで暗号化した値を保存。
+
 ### audit_logs
 - 監査ログ最小構成。
 - 操作者、操作種別、対象エンティティ、メタ情報(JSON)を保持。
@@ -66,3 +71,5 @@
 - OTP送信チャネルは現時点で `email` のみ実装。`phone` はAPIインターフェースのみ先行。
 - ランキング集計バッチの実行タイミング（日次/時間単位）は未確定。
 - `audit_logs.metadata` の構造はイベントごとに運用で定義。
+- メール設定は `email_settings` 単一レコード管理（MVP仮置き）。
+- `smtp_password_encrypted` の暗号鍵運用（ローテーション/復旧）は後続Issueで設計。

@@ -1,5 +1,8 @@
+import base64
 import enum
+import hashlib
 
+from flask import current_app
 from sqlalchemy import CheckConstraint, UniqueConstraint
 from werkzeug.security import check_password_hash, generate_password_hash
 from sqlalchemy.orm import validates
@@ -211,3 +214,61 @@ class AuditLog(db.Model):
     entity_id = db.Column(db.String(64), nullable=False)
     metadata_json = db.Column("metadata", db.JSON, nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), nullable=False)
+
+
+def _derive_cipher_key() -> bytes:
+    configured_key = current_app.config.get("EMAIL_SETTINGS_ENCRYPTION_KEY")
+    if configured_key:
+        seed = configured_key
+    else:
+        seed = current_app.config.get("SECRET_KEY", "quizverse-default-secret")
+    return hashlib.sha256(seed.encode("utf-8")).digest()
+
+
+def _xor_bytes(raw: bytes, key: bytes) -> bytes:
+    return bytes(raw[i] ^ key[i % len(key)] for i in range(len(raw)))
+
+
+def _encrypt_secret(raw: str) -> str:
+    key = _derive_cipher_key()
+    encrypted = _xor_bytes(raw.encode("utf-8"), key)
+    return base64.urlsafe_b64encode(encrypted).decode("utf-8")
+
+
+def _decrypt_secret(cipher_text: str):
+    key = _derive_cipher_key()
+    try:
+        encrypted = base64.urlsafe_b64decode(cipher_text.encode("utf-8"))
+        decrypted = _xor_bytes(encrypted, key)
+        return decrypted.decode("utf-8")
+    except Exception:
+        return None
+
+
+class EmailSettings(TimestampMixin, db.Model):
+    __tablename__ = "email_settings"
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    sender_name = db.Column(db.String(120), nullable=False, default="")
+    sender_email = db.Column(db.String(255), nullable=False, default="")
+    smtp_host = db.Column(db.String(255), nullable=False, default="")
+    smtp_port = db.Column(db.Integer, nullable=False, default=587)
+    smtp_username = db.Column(db.String(255), nullable=False, default="")
+    smtp_password_encrypted = db.Column(db.Text, nullable=True)
+    use_tls = db.Column(db.Boolean, nullable=False, default=True)
+    use_ssl = db.Column(db.Boolean, nullable=False, default=False)
+
+    @property
+    def smtp_password(self):
+        if not self.smtp_password_encrypted:
+            return None
+        return _decrypt_secret(self.smtp_password_encrypted)
+
+    @smtp_password.setter
+    def smtp_password(self, raw_password: str):
+        if raw_password is None:
+            self.smtp_password_encrypted = None
+            return
+        if raw_password == "":
+            return
+        self.smtp_password_encrypted = _encrypt_secret(raw_password)

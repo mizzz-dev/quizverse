@@ -1,8 +1,10 @@
+from email.utils import parseaddr
+
 from flask import Blueprint, jsonify, request
 from sqlalchemy import func
 
 from ..extensions import db
-from ..models import PlayStatus, Quiz, QuizPlay, User
+from ..models import EmailSettings, PlayStatus, Quiz, QuizPlay, User
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/api/admin")
 
@@ -11,8 +13,26 @@ DEFAULT_PER_PAGE = 20
 MAX_PER_PAGE = 50
 
 
+TRUTHY_VALUES = {"1", "true", "yes", "on"}
+
+
 def _error_response(code: str, message: str, status_code: int):
     return jsonify({"error": {"code": code, "message": message}}), status_code
+
+
+def _is_provisional_admin() -> bool:
+    admin_mode = request.headers.get("X-Admin-Mode", "")
+    return admin_mode.strip().lower() in TRUTHY_VALUES
+
+
+def _require_provisional_admin():
+    if _is_provisional_admin():
+        return None
+    return _error_response(
+        "admin/forbidden",
+        "Admin role is required. Provisional check expects X-Admin-Mode=true.",
+        403,
+    )
 
 
 def _validate_pagination(query_params):
@@ -54,6 +74,36 @@ def _mask_email(email: str):
     if len(local) <= 2:
         return f"{local[0]}***@{domain}"
     return f"{local[:2]}***@{domain}"
+
+
+def _validate_email_settings_payload(payload):
+    required_fields = ["sender_name", "sender_email", "smtp_host", "smtp_username"]
+    for field in required_fields:
+        value = payload.get(field)
+        if not isinstance(value, str) or not value.strip():
+            return f"{field} is required."
+
+    _, parsed_email = parseaddr(payload.get("sender_email", ""))
+    if "@" not in parsed_email:
+        return "sender_email must be a valid email address."
+
+    smtp_port = payload.get("smtp_port")
+    if not isinstance(smtp_port, int) or smtp_port < 1 or smtp_port > 65535:
+        return "smtp_port must be an integer between 1 and 65535."
+
+    use_tls = payload.get("use_tls")
+    use_ssl = payload.get("use_ssl")
+    if not isinstance(use_tls, bool) or not isinstance(use_ssl, bool):
+        return "use_tls and use_ssl must be boolean."
+
+    if use_tls and use_ssl:
+        return "use_tls and use_ssl cannot both be true."
+
+    smtp_password = payload.get("smtp_password", "")
+    if smtp_password is not None and not isinstance(smtp_password, str):
+        return "smtp_password must be a string."
+
+    return None
 
 
 @admin_bp.get("/overview")
@@ -158,3 +208,105 @@ def get_admin_quizzes():
     ]
 
     return jsonify({"items": items, "pagination": _serialize_pagination(page, per_page, total)})
+
+
+@admin_bp.get("/email-settings")
+def get_email_settings():
+    permission_error = _require_provisional_admin()
+    if permission_error:
+        return permission_error
+
+    settings = EmailSettings.query.order_by(EmailSettings.id.asc()).first()
+    if not settings:
+        return jsonify(
+            {
+                "email_settings": {
+                    "sender_name": "",
+                    "sender_email": "",
+                    "smtp_host": "",
+                    "smtp_port": 587,
+                    "smtp_username": "",
+                    "use_tls": True,
+                    "use_ssl": False,
+                    "smtp_password_masked": "",
+                    "has_smtp_password": False,
+                },
+                "meta": {
+                    "provisional_admin": True,
+                    "password_policy": "smtp_password is accepted only on update and never returned as plain text.",
+                },
+            }
+        )
+
+    return jsonify(
+        {
+            "email_settings": {
+                "sender_name": settings.sender_name,
+                "sender_email": settings.sender_email,
+                "smtp_host": settings.smtp_host,
+                "smtp_port": settings.smtp_port,
+                "smtp_username": settings.smtp_username,
+                "use_tls": settings.use_tls,
+                "use_ssl": settings.use_ssl,
+                "smtp_password_masked": "********" if settings.smtp_password_encrypted else "",
+                "has_smtp_password": bool(settings.smtp_password_encrypted),
+                "updated_at": settings.updated_at.isoformat() if settings.updated_at else None,
+            },
+            "meta": {
+                "provisional_admin": True,
+                "password_policy": "smtp_password is accepted only on update and never returned as plain text.",
+            },
+        }
+    )
+
+
+@admin_bp.put("/email-settings")
+def put_email_settings():
+    permission_error = _require_provisional_admin()
+    if permission_error:
+        return permission_error
+
+    payload = request.get_json(silent=True) or {}
+    validation_error = _validate_email_settings_payload(payload)
+    if validation_error:
+        return _error_response("admin/validation_error", validation_error, 400)
+
+    settings = EmailSettings.query.order_by(EmailSettings.id.asc()).first()
+    if not settings:
+        settings = EmailSettings(id=1)
+        db.session.add(settings)
+
+    settings.sender_name = payload["sender_name"].strip()
+    settings.sender_email = payload["sender_email"].strip()
+    settings.smtp_host = payload["smtp_host"].strip()
+    settings.smtp_port = payload["smtp_port"]
+    settings.smtp_username = payload["smtp_username"].strip()
+    settings.use_tls = payload["use_tls"]
+    settings.use_ssl = payload["use_ssl"]
+
+    smtp_password = payload.get("smtp_password")
+    if isinstance(smtp_password, str) and smtp_password.strip():
+        settings.smtp_password = smtp_password
+
+    db.session.commit()
+
+    return jsonify(
+        {
+            "email_settings": {
+                "sender_name": settings.sender_name,
+                "sender_email": settings.sender_email,
+                "smtp_host": settings.smtp_host,
+                "smtp_port": settings.smtp_port,
+                "smtp_username": settings.smtp_username,
+                "use_tls": settings.use_tls,
+                "use_ssl": settings.use_ssl,
+                "smtp_password_masked": "********" if settings.smtp_password_encrypted else "",
+                "has_smtp_password": bool(settings.smtp_password_encrypted),
+                "updated_at": settings.updated_at.isoformat() if settings.updated_at else None,
+            },
+            "meta": {
+                "password_updated": isinstance(smtp_password, str) and bool(smtp_password.strip()),
+                "provisional_admin": True,
+            },
+        }
+    )
