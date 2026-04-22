@@ -47,6 +47,9 @@ cd backend && PYTHONPATH=. pytest
   - `POST /api/quizzes/{quiz_id}/play`: JWT必須。回答送信・採点・プレイ履歴保存（`quiz_plays`/`quiz_play_answers`）
   - `GET /api/quizzes/{quiz_id}/rankings`: クイズ単位ランキング（ユーザーごとのベストプレイ採用、同点時は score/correct_count/played_at/play_id で決定）
   - `GET /api/rankings`: 総合ランキング（ユーザー×クイズのベストスコアを合算、ページング対応）
+  - `GET /api/admin/overview`: 管理ダッシュボード向けサマリー（ユーザー数 / クイズ数 / プレイ数 / サービス状況）
+  - `GET /api/admin/users`: 管理向けユーザー一覧（emailはマスクした値のみ返却）
+  - `GET /api/admin/quizzes`: 管理向けクイズ一覧（作成者・ステータス・プレイ数）
   - `POST /api/auth/register`: メールアドレス・パスワードで新規登録しJWTを発行
   - `POST /api/auth/login`: メールアドレス・パスワードでJWTを発行
   - `POST /api/auth/google`: Google ID token を検証し、OAuthログインでJWTを発行
@@ -73,6 +76,7 @@ cd backend && PYTHONPATH=. pytest
 - Issue: `docs/issues/ISSUE-0009.md`
 - Issue: `docs/issues/ISSUE-0010.md`
 - Issue: `docs/issues/ISSUE-0011.md`
+- Issue: `docs/issues/ISSUE-0014.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
 - Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
@@ -85,3 +89,10 @@ cd backend && PYTHONPATH=. pytest
 - Qiita下書き: `docs/qiita/ISSUE-0009_quiz_list_search_detail_api.md`
 - Qiita下書き: `docs/qiita/ISSUE-0010_quiz_play_scoring_api.md`
 - Qiita下書き: `docs/qiita/ISSUE-0011_ranking_api.md`
+- Qiita下書き: `docs/qiita/ISSUE-0014_admin_dashboard_foundation.md`
+
+## フロントエンド（管理ダッシュボード / ISSUE-0014）
+- `/admin` 配下に管理ダッシュボード基盤を追加しました。
+- 仮置きの admin 判定として `localStorage["quizverse_is_admin"]` を利用します。
+- 初回アクセス時は一般ユーザー扱いのため、画面内トグルで管理者モードへ切り替えて確認してください。
+- MVPとして、ローディング（skeleton）/ 空状態 / エラー状態を基本実装しています。
