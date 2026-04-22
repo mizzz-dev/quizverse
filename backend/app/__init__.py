@@ -1,5 +1,6 @@
 from flask import Flask
 
+from .api.admin import admin_bp
 from .api.auth import auth_bp
 from .api.health import health_bp
 from .api.quizzes import quizzes_bp
@@ -18,6 +19,7 @@ def create_app(config_class=Config):
     migrate.init_app(app, db)
 
     app.register_blueprint(health_bp)
+    app.register_blueprint(admin_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(quizzes_bp)
     app.register_blueprint(rankings_bp)
