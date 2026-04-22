@@ -93,3 +93,64 @@ def test_admin_endpoints_validate_pagination():
     response = client.get("/api/admin/quizzes", query_string={"page": 1, "per_page": 99})
     assert response.status_code == 400
     assert response.get_json()["error"]["code"] == "admin/validation_error"
+
+
+def test_admin_email_settings_requires_admin_header():
+    _app, client = _create_client()
+
+    response = client.get("/api/admin/email-settings")
+    assert response.status_code == 403
+    assert response.get_json()["error"]["code"] == "admin/forbidden"
+
+
+def test_admin_email_settings_put_and_get_masked_password():
+    _app, client = _create_client()
+    headers = {"X-Admin-Mode": "true"}
+
+    response = client.put(
+        "/api/admin/email-settings",
+        headers=headers,
+        json={
+            "sender_name": "QuizVerse通知",
+            "sender_email": "notify@example.com",
+            "smtp_host": "smtp.example.com",
+            "smtp_port": 587,
+            "smtp_username": "smtp-user",
+            "smtp_password": "top-secret",
+            "use_tls": True,
+            "use_ssl": False,
+        },
+    )
+    assert response.status_code == 200
+    saved_json = response.get_json()
+    assert saved_json["email_settings"]["has_smtp_password"] is True
+    assert saved_json["email_settings"]["smtp_password_masked"] == "********"
+
+    get_response = client.get("/api/admin/email-settings", headers=headers)
+    assert get_response.status_code == 200
+    get_json = get_response.get_json()
+    assert get_json["email_settings"]["sender_email"] == "notify@example.com"
+    assert get_json["email_settings"]["smtp_password_masked"] == "********"
+    assert "smtp_password" not in get_json["email_settings"]
+
+
+def test_admin_email_settings_validation():
+    _app, client = _create_client()
+    headers = {"X-Admin-Mode": "true"}
+
+    response = client.put(
+        "/api/admin/email-settings",
+        headers=headers,
+        json={
+            "sender_name": "QuizVerse通知",
+            "sender_email": "invalid-email",
+            "smtp_host": "smtp.example.com",
+            "smtp_port": 587,
+            "smtp_username": "smtp-user",
+            "smtp_password": "",
+            "use_tls": True,
+            "use_ssl": True,
+        },
+    )
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "admin/validation_error"

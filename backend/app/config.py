@@ -13,6 +13,7 @@ class Config:
         os.getenv("AUTH_ENABLE_DEV_TOKEN_ENDPOINT", "true").lower() == "true"
     )
     GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
+    EMAIL_SETTINGS_ENCRYPTION_KEY = os.getenv("EMAIL_SETTINGS_ENCRYPTION_KEY")
     OTP_EXPIRES_SECONDS = int(os.getenv("OTP_EXPIRES_SECONDS", "300"))
     OTP_MIN_RESEND_SECONDS = int(os.getenv("OTP_MIN_RESEND_SECONDS", "60"))
     OTP_MAX_REQUESTS_PER_HOUR = int(os.getenv("OTP_MAX_REQUESTS_PER_HOUR", "5"))

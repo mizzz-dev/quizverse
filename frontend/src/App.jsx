@@ -4,7 +4,7 @@ const navItems = [
   { key: 'dashboard', label: 'ダッシュボード', path: '/admin' },
   { key: 'users', label: 'ユーザー管理', path: '/admin/users' },
   { key: 'quizzes', label: 'クイズ管理', path: '/admin/quizzes' },
-  { key: 'settings', label: 'メール設定', path: '/admin/settings' },
+  { key: 'settings_email', label: 'メール設定', path: '/admin/settings/email' },
 ]
 
 const fallbackOverview = {
@@ -21,6 +21,25 @@ const statusTone = {
   warning: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
   error: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
 }
+
+const defaultEmailSettings = {
+  sender_name: '',
+  sender_email: '',
+  smtp_host: '',
+  smtp_port: 587,
+  smtp_username: '',
+  smtp_password: '',
+  use_tls: true,
+  use_ssl: false,
+}
+
+const adminHeaders = (isAdmin) =>
+  isAdmin
+    ? {
+        'Content-Type': 'application/json',
+        'X-Admin-Mode': 'true',
+      }
+    : { 'Content-Type': 'application/json' }
 
 function usePath() {
   const [path, setPath] = useState(window.location.pathname)
@@ -92,7 +111,7 @@ function useAdminData(isAdmin) {
 
 function AdminLayout({ children, moveTo, path, onToggleAdmin, isAdmin }) {
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
+    <div className="min-h-screen bg-slate-950 text-slate-100 dark:bg-slate-950">
       <div className="mx-auto flex w-full max-w-7xl gap-6 p-4 md:p-6">
         <aside className="sticky top-4 hidden h-[calc(100vh-2rem)] w-72 shrink-0 rounded-3xl border border-slate-800 bg-slate-900/80 p-5 shadow-2xl shadow-slate-950/40 backdrop-blur md:flex md:flex-col">
           <p className="text-xs uppercase tracking-[0.2em] text-cyan-300">QuizVerse Admin</p>
@@ -145,6 +164,10 @@ function AdminLayout({ children, moveTo, path, onToggleAdmin, isAdmin }) {
 
 function SkeletonCard() {
   return <div className="h-28 animate-pulse rounded-2xl border border-slate-800 bg-slate-900" />
+}
+
+function SkeletonInput() {
+  return <div className="h-10 animate-pulse rounded-xl border border-slate-800 bg-slate-900" />
 }
 
 function DashboardPage({ overview, loading }) {
@@ -255,13 +278,217 @@ function QuizzesPage({ quizzes, loading }) {
   )
 }
 
-function SettingsPage() {
+function SettingsPage({ isAdmin }) {
+  const [form, setForm] = useState(defaultEmailSettings)
+  const [hasPassword, setHasPassword] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      setLoading(true)
+      setError('')
+      try {
+        const response = await fetch('/api/admin/email-settings', {
+          headers: adminHeaders(isAdmin),
+        })
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => null)
+          throw new Error(errorBody?.error?.message ?? 'メール設定の取得に失敗しました。')
+        }
+        const json = await response.json()
+        const settings = json.email_settings ?? {}
+        setForm((prev) => ({
+          ...prev,
+          sender_name: settings.sender_name ?? '',
+          sender_email: settings.sender_email ?? '',
+          smtp_host: settings.smtp_host ?? '',
+          smtp_port: settings.smtp_port ?? 587,
+          smtp_username: settings.smtp_username ?? '',
+          use_tls: Boolean(settings.use_tls),
+          use_ssl: Boolean(settings.use_ssl),
+          smtp_password: '',
+        }))
+        setHasPassword(Boolean(settings.has_smtp_password))
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '不明なエラーが発生しました。')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    if (isAdmin) fetchSettings()
+  }, [isAdmin])
+
+  const validate = () => {
+    if (!form.sender_name.trim()) return '送信元名は必須です。'
+    if (!form.sender_email.includes('@')) return '送信元メールアドレスの形式が不正です。'
+    if (!form.smtp_host.trim()) return 'SMTPホストは必須です。'
+    if (!Number.isInteger(Number(form.smtp_port)) || Number(form.smtp_port) < 1 || Number(form.smtp_port) > 65535) {
+      return 'SMTPポートは1〜65535の整数で入力してください。'
+    }
+    if (!form.smtp_username.trim()) return 'SMTPユーザー名は必須です。'
+    if (form.use_tls && form.use_ssl) return 'TLSとSSLを同時に有効化できません。'
+    return ''
+  }
+
+  const onSave = async () => {
+    setSuccess('')
+    const validationError = validate()
+    if (validationError) {
+      setError(validationError)
+      return
+    }
+
+    setSaving(true)
+    setError('')
+    try {
+      const payload = {
+        sender_name: form.sender_name.trim(),
+        sender_email: form.sender_email.trim(),
+        smtp_host: form.smtp_host.trim(),
+        smtp_port: Number(form.smtp_port),
+        smtp_username: form.smtp_username.trim(),
+        smtp_password: form.smtp_password,
+        use_tls: form.use_tls,
+        use_ssl: form.use_ssl,
+      }
+
+      const response = await fetch('/api/admin/email-settings', {
+        method: 'PUT',
+        headers: adminHeaders(isAdmin),
+        body: JSON.stringify(payload),
+      })
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null)
+        throw new Error(errorBody?.error?.message ?? 'メール設定の保存に失敗しました。')
+      }
+
+      const json = await response.json()
+      const passwordUpdated = Boolean(json.meta?.password_updated)
+      if (passwordUpdated) {
+        setForm((prev) => ({ ...prev, smtp_password: '' }))
+      }
+      setHasPassword(Boolean(json.email_settings?.has_smtp_password))
+      setSuccess('メール設定を保存しました。')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '不明なエラーが発生しました。')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const onFieldChange = (key, value) => {
+    setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  if (loading) {
+    return (
+      <section className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+        <SkeletonInput />
+        <SkeletonInput />
+        <SkeletonInput />
+        <SkeletonInput />
+        <SkeletonInput />
+      </section>
+    )
+  }
+
   return (
-    <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-      <h2 className="text-lg font-semibold">メール設定（雛形）</h2>
-      <p className="mt-3 text-sm text-slate-400">今回は導線のみ実装。保存機能は次Issueで対応予定です。</p>
-      <div className="mt-4 rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-300">
-        SMTPホスト / 送信元アドレス / テンプレートの管理UIをここに追加予定です。
+    <section className="space-y-5 pb-24">
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+        <h2 className="text-lg font-semibold">メール設定</h2>
+        <p className="mt-2 text-sm text-slate-400">OTP送信・通知メール送信の基盤となる SMTP 設定を管理します。</p>
+      </div>
+
+      {success && (
+        <div className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{success}</div>
+      )}
+      {error && <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
+
+      <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+        <h3 className="text-base font-semibold">基本設定</h3>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <label className="space-y-2 text-sm">
+            <span className="text-slate-300">送信元名</span>
+            <input className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2" value={form.sender_name} onChange={(e) => onFieldChange('sender_name', e.target.value)} />
+          </label>
+          <label className="space-y-2 text-sm">
+            <span className="text-slate-300">送信元メールアドレス</span>
+            <input className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2" value={form.sender_email} onChange={(e) => onFieldChange('sender_email', e.target.value)} />
+          </label>
+        </div>
+      </article>
+
+      <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+        <h3 className="text-base font-semibold">SMTP接続設定</h3>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <label className="space-y-2 text-sm md:col-span-2">
+            <span className="text-slate-300">SMTPホスト</span>
+            <input className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2" value={form.smtp_host} onChange={(e) => onFieldChange('smtp_host', e.target.value)} />
+          </label>
+          <label className="space-y-2 text-sm">
+            <span className="text-slate-300">SMTPポート</span>
+            <input className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2" type="number" value={form.smtp_port} onChange={(e) => onFieldChange('smtp_port', e.target.value)} />
+          </label>
+          <label className="space-y-2 text-sm">
+            <span className="text-slate-300">SMTPユーザー名</span>
+            <input className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2" value={form.smtp_username} onChange={(e) => onFieldChange('smtp_username', e.target.value)} />
+          </label>
+        </div>
+      </article>
+
+      <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+        <h3 className="text-base font-semibold">セキュリティ関連</h3>
+        <p className="mt-2 text-xs text-slate-400">
+          保存済みパスワードは再表示されません。変更時のみ新しい値を入力してください。{hasPassword ? '（保存済み）' : '（未保存）'}
+        </p>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <label className="space-y-2 text-sm md:col-span-2">
+            <span className="text-slate-300">SMTPパスワード</span>
+            <div className="flex gap-2">
+              <input
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2"
+                type={showPassword ? 'text' : 'password'}
+                value={form.smtp_password}
+                onChange={(e) => onFieldChange('smtp_password', e.target.value)}
+                placeholder={hasPassword ? '******** (変更する場合のみ入力)' : '新しいパスワードを入力'}
+              />
+              <button
+                className="rounded-xl border border-slate-700 px-3 py-2 text-sm hover:bg-slate-800"
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+              >
+                {showPassword ? '隠す' : '表示'}
+              </button>
+            </div>
+          </label>
+
+          <label className="flex items-center gap-2 rounded-xl border border-slate-800 px-3 py-2 text-sm">
+            <input type="checkbox" checked={form.use_tls} onChange={(e) => onFieldChange('use_tls', e.target.checked)} />
+            STARTTLSを使用する
+          </label>
+          <label className="flex items-center gap-2 rounded-xl border border-slate-800 px-3 py-2 text-sm">
+            <input type="checkbox" checked={form.use_ssl} onChange={(e) => onFieldChange('use_ssl', e.target.checked)} />
+            SSL/TLSを使用する
+          </label>
+        </div>
+      </article>
+
+      <div className="fixed bottom-4 right-4 left-4 md:left-auto md:w-[420px]">
+        <div className="rounded-2xl border border-cyan-500/40 bg-slate-900/95 p-3 shadow-2xl backdrop-blur">
+          <button
+            className="w-full rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:opacity-60"
+            type="button"
+            disabled={saving}
+            onClick={onSave}
+          >
+            {saving ? '保存中...' : 'メール設定を保存'}
+          </button>
+        </div>
       </div>
     </section>
   )
@@ -283,13 +510,13 @@ export function App() {
     if (path === '/admin') return <DashboardPage overview={overview} loading={loading} />
     if (path === '/admin/users') return <UsersPage users={users} loading={loading} />
     if (path === '/admin/quizzes') return <QuizzesPage quizzes={quizzes} loading={loading} />
-    if (path === '/admin/settings') return <SettingsPage />
+    if (path === '/admin/settings' || path === '/admin/settings/email') return <SettingsPage isAdmin={isAdmin} />
     return (
       <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 text-sm text-slate-300">
         ページが見つかりません。<button className="ml-2 underline" onClick={() => moveTo('/admin')}>/admin に戻る</button>
       </section>
     )
-  }, [loading, moveTo, overview, path, quizzes, users])
+  }, [loading, moveTo, overview, path, quizzes, users, isAdmin])
 
   return (
     <AdminLayout moveTo={moveTo} path={path} onToggleAdmin={onToggleAdmin} isAdmin={isAdmin}>
