@@ -5,6 +5,7 @@ from .api.auth import auth_bp
 from .api.health import health_bp
 from .api.quizzes import quizzes_bp
 from .api.rankings import rankings_bp
+from .api.status import status_bp
 from .config import Config
 from .extensions import db, jwt, migrate
 from . import models  # noqa: F401
@@ -23,6 +24,7 @@ def create_app(config_class=Config):
     app.register_blueprint(auth_bp)
     app.register_blueprint(quizzes_bp)
     app.register_blueprint(rankings_bp)
+    app.register_blueprint(status_bp)
 
     return app
 

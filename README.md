@@ -53,6 +53,8 @@ cd backend && PYTHONPATH=. pytest
   - `GET /api/admin/quizzes`: 管理向けクイズ一覧（作成者・ステータス・プレイ数）
   - `GET /api/admin/email-settings`: 管理向けメール設定取得（機密値はマスクのみ返却、`X-Admin-Mode: true` が必要）
   - `PUT /api/admin/email-settings`: 管理向けメール設定保存（SMTPパスワードは更新時のみ受け取り）
+  - `GET /api/status`: 一般公開向けサービスステータス（アプリ/API/DB/認証/メール/メンテナンス）
+  - `GET /api/admin/status`: 管理向け詳細ステータス（仮置き管理判定: `X-Admin-Mode: true`）
   - `POST /api/auth/register`: メールアドレス・パスワードで新規登録しJWTを発行
   - `POST /api/auth/login`: メールアドレス・パスワードでJWTを発行
   - `POST /api/auth/google`: Google ID token を検証し、OAuthログインでJWTを発行
@@ -81,6 +83,7 @@ cd backend && PYTHONPATH=. pytest
 - Issue: `docs/issues/ISSUE-0011.md`
 - Issue: `docs/issues/ISSUE-0014.md`
 - Issue: `docs/issues/ISSUE-0015.md`
+- Issue: `docs/issues/ISSUE-0016.md`
 - スキーマ定義: `docs/schema/mvp_core_tables.md`
 - Qiita下書き: `docs/qiita/ISSUE-0001_mvp_infra_bootstrap.md`
 - Qiita下書き: `docs/qiita/ISSUE-0002_flask_migrate_foundation.md`
@@ -95,12 +98,18 @@ cd backend && PYTHONPATH=. pytest
 - Qiita下書き: `docs/qiita/ISSUE-0011_ranking_api.md`
 - Qiita下書き: `docs/qiita/ISSUE-0014_admin_dashboard_foundation.md`
 - Qiita下書き: `docs/qiita/ISSUE-0015_email_settings_ui_and_smtp_api.md`
+- Qiita下書き: `docs/qiita/ISSUE-0016_service_status_page_and_ops_visibility.md`
 
 ## フロントエンド（管理ダッシュボード / ISSUE-0014）
 - `/admin` 配下に管理ダッシュボード基盤を追加しました。
 - 仮置きの admin 判定として `localStorage["quizverse_is_admin"]` を利用します。
 - 初回アクセス時は一般ユーザー扱いのため、画面内トグルで管理者モードへ切り替えて確認してください。
 - MVPとして、ローディング（skeleton）/ 空状態 / エラー状態を基本実装しています。
+
+## フロントエンド（サービス状況表示 / ISSUE-0016）
+- 公開向けステータスページを `/status` として実装。
+- ステータスカードで `正常 / 注意 / 障害 / メンテナンス中` を色分け表示。
+- skeleton loading / 空状態 / エラー状態 / 更新時刻表示を実装。
 
 ## フロントエンド（メール設定 / ISSUE-0015）
 - 管理画面のメール設定ルートを `/admin/settings/email` として実装。
